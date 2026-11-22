@@ -133,50 +133,63 @@ object PdfSupport {
         }
     }
 
-    /** 导入 PDF：每个 PDF 页生成一个笔记页，返回新增页数 */
+    /** 导入 PDF：每个 PDF 页生成一个笔记页，返回新增页数；失败抛异常（由 UI 层提示） */
     suspend fun importPdf(context: Context, uri: Uri, notebook: Notebook): Int =
         withContext(Dispatchers.IO) {
-            val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return@withContext 0
-            var added = 0
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+                ?: throw IllegalStateException("无法打开所选文件（可能是临时文件或无读取权限）")
             try {
-                val renderer = PdfRenderer(pfd)
-                for (i in 0 until renderer.pageCount) {
-                    val pdfPage = renderer.openPage(i)
-                    val scale = 3f
-                    val bmp = Bitmap.createBitmap(
-                        (pdfPage.width * scale).toInt().coerceAtLeast(1),
-                        (pdfPage.height * scale).toInt().coerceAtLeast(1),
-                        Bitmap.Config.ARGB_8888
-                    )
-                    bmp.eraseColor(android.graphics.Color.WHITE)
-                    pdfPage.render(
-                        bmp,
-                        null,
-                        Matrix().apply { postScale(scale, scale) },
-                        PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
-                    )
-                    val newPage = Page(
-                        id = UUID.randomUUID().toString(),
-                        paper = PaperType.A4_BLANK,
-                        width = pdfPage.width.toFloat(),
-                        height = pdfPage.height.toFloat()
-                    )
-                    val fname = "bg_${newPage.id}.png"
-                    Store.bgFile(context, notebook.id, fname).outputStream().use {
-                        bmp.compress(Bitmap.CompressFormat.PNG, 90, it)
-                    }
-                    newPage.backgroundImage = fname
-                    notebook.pages.add(newPage)
-                    pdfPage.close()
-                    bmp.recycle()
-                    added++
+                val renderer = try {
+                    PdfRenderer(pfd)
+                } catch (e: Exception) {
+                    throw IllegalStateException("PDF 解析失败（可能已加密或文件损坏）：${e.message}", e)
                 }
-                renderer.close()
-            } catch (_: Exception) {
+                var added = 0
+                try {
+                    for (i in 0 until renderer.pageCount) {
+                        val pdfPage = renderer.openPage(i)
+                        // 限制位图最长边 ≤ 2048px，防止超大页面 OOM
+                        val maxDim = maxOf(pdfPage.width, pdfPage.height).coerceAtLeast(1)
+                        val scale = (2048f / maxDim).coerceIn(1f, 3f)
+                        val bmp = Bitmap.createBitmap(
+                            (pdfPage.width * scale).toInt().coerceAtLeast(1),
+                            (pdfPage.height * scale).toInt().coerceAtLeast(1),
+                            Bitmap.Config.ARGB_8888
+                        )
+                        try {
+                            bmp.eraseColor(android.graphics.Color.WHITE)
+                            pdfPage.render(
+                                bmp,
+                                null,
+                                Matrix().apply { postScale(scale, scale) },
+                                PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
+                            )
+                            val newPage = Page(
+                                id = UUID.randomUUID().toString(),
+                                paper = PaperType.A4_BLANK,
+                                width = pdfPage.width.toFloat(),
+                                height = pdfPage.height.toFloat()
+                            )
+                            val fname = "bg_${newPage.id}.png"
+                            Store.bgFile(context, notebook.id, fname).outputStream().use {
+                                bmp.compress(Bitmap.CompressFormat.PNG, 90, it)
+                            }
+                            newPage.backgroundImage = fname
+                            notebook.pages.add(newPage)
+                            added++
+                        } finally {
+                            bmp.recycle()
+                            pdfPage.close()
+                        }
+                    }
+                } finally {
+                    renderer.close()
+                }
+                android.util.Log.i("Lnotein", "PDF imported: $added pages")
+                added
             } finally {
                 pfd.close()
             }
-            added
         }
 
     /** 矢量导出整个笔记本为 PDF */

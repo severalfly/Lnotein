@@ -103,17 +103,31 @@ fun LibraryScreen(onOpen: (String) -> Unit) {
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                val name = context.contentResolver
-                    .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-                    ?.replace(Regex("\\.pdf$", RegexOption.IGNORE_CASE), "")
-                    ?: "导入的 PDF"
-                val nb = Store.newNotebook(name.ifBlank { "导入的 PDF" }, PaperType.A4_BLANK)
-                val added = PdfSupport.importPdf(context, uri, nb)
-                if (added > 0) {
-                    Store.saveNotebook(context, nb)
-                    notebooks = Store.listNotebooks(context)
-                    onOpen(nb.id)
+                try {
+                    val name = context.contentResolver
+                        .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                        ?.replace(Regex("\\.pdf$", RegexOption.IGNORE_CASE), "")
+                        ?: "导入的 PDF"
+                    val nb = Store.newNotebook(name.ifBlank { "导入的 PDF" }, PaperType.A4_BLANK)
+                    val added = PdfSupport.importPdf(context, uri, nb)
+                    if (added > 0) {
+                        Store.saveNotebook(context, nb)
+                        notebooks = Store.listNotebooks(context)
+                        android.widget.Toast.makeText(
+                            context, "已导入 $added 页", android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        onOpen(nb.id)
+                    } else {
+                        android.widget.Toast.makeText(
+                            context, "未读取到任何页面", android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(
+                        context, "导入失败：${e.message ?: e.javaClass.simpleName}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }

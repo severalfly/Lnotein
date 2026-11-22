@@ -88,10 +88,20 @@ fun EditorScreen(notebookId: String, onBack: () -> Unit) {
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                val added = PdfSupport.importPdf(context, uri, notebook)
-                if (added > 0) {
-                    state.goPage(state.pageCount - added)
-                    state.scheduleSave()
+                try {
+                    val added = PdfSupport.importPdf(context, uri, notebook)
+                    if (added > 0) {
+                        state.goPage(state.pageCount - added)
+                        state.scheduleSave()
+                        android.widget.Toast.makeText(
+                            context, "已导入 $added 页", android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(
+                        context, "导入失败：${e.message ?: e.javaClass.simpleName}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
