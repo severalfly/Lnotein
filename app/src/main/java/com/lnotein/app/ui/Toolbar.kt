@@ -27,6 +27,7 @@ enum class ToolbarAction(val label: String) {
     MARKER("荧光"),
     LASER("激光"),
     ERASER("擦除"),
+    TEXT("文本"),
     UNDO("撤销"),
     REDO("重做"),
     PAGES("页面"),
@@ -40,6 +41,7 @@ enum class ToolbarAction(val label: String) {
             MARKER -> Tool.MARKER
             LASER -> Tool.LASER
             ERASER -> Tool.ERASER
+            TEXT -> Tool.TEXT
             else -> null
         }
 
@@ -153,7 +155,8 @@ fun ToolbarRow(
                     onClick = {
                         when (action) {
                             ToolbarAction.PEN, ToolbarAction.MARKER,
-                            ToolbarAction.LASER, ToolbarAction.ERASER -> state.tool = action.tool!!
+                            ToolbarAction.LASER, ToolbarAction.ERASER,
+                            ToolbarAction.TEXT -> state.tool = action.tool!!
                             ToolbarAction.UNDO -> state.undo()
                             ToolbarAction.REDO -> state.redo()
                             ToolbarAction.PAGES -> state.showPages = true

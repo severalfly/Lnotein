@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import com.lnotein.app.data.Store
 import com.lnotein.app.model.Page
 import com.lnotein.app.model.PaperType
+import com.lnotein.app.model.TextNote
 import com.lnotein.app.model.Tool
 import com.lnotein.app.model.label
 import com.lnotein.app.pdf.PdfSupport
@@ -126,7 +127,7 @@ fun EditorScreen(notebookId: String, onBack: () -> Unit) {
             onImport = { importLauncher.launch(arrayOf("application/pdf")) },
             onExport = { exportLauncher.launch("${notebook.name}.pdf") }
         )
-        if (state.tool == Tool.PEN || state.tool == Tool.MARKER) {
+        if (state.tool == Tool.PEN || state.tool == Tool.MARKER || state.tool == Tool.TEXT) {
             BrushOptionsRow(state)
         }
         Box(
@@ -139,12 +140,74 @@ fun EditorScreen(notebookId: String, onBack: () -> Unit) {
         BottomPageBar(state)
     }
 
+    // 打开 PDF 页时自动适配页面
+    LaunchedEffect(state.pageIndex) {
+        if (state.page.backgroundImage != null) state.fitPage()
+    }
+
     if (state.showPages) {
         PagesDialog(state) { state.showPages = false }
+    }
+    if (state.showTextDialog) {
+        TextNoteDialog(state)
     }
     if (state.showSettings) {
         SettingsSheet(state, cfg, context)
     }
+}
+
+@Composable
+private fun TextNoteDialog(state: EditorState) {
+    val editing = state.editingText
+    var text by remember(state.showTextDialog, editing?.id) {
+        mutableStateOf(editing?.text ?: "")
+    }
+    AlertDialog(
+        onDismissRequest = { state.cancelTextDialog() },
+        title = { Text(if (editing != null) "编辑文本批注" else "添加文本批注") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("批注内容（可换行）") },
+                    minLines = 2,
+                    maxLines = 8,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    presetColors.forEach { c ->
+                        val selected = state.color == c
+                        Box(
+                            Modifier
+                                .size(26.dp)
+                                .background(Color(c), CircleShape)
+                                .border(
+                                    if (selected) 3.dp else 1.dp,
+                                    if (selected) MaterialTheme.colorScheme.primary else Color.Gray,
+                                    CircleShape
+                                )
+                                .clickable { state.color = c }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { state.saveText(text, state.color) }) { Text("保存") }
+        },
+        dismissButton = {
+            Row {
+                if (editing != null) {
+                    TextButton(onClick = { state.deleteText(editing) }) {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = { state.cancelTextDialog() }) { Text("取消") }
+            }
+        }
+    )
 }
 
 @Composable
@@ -210,7 +273,7 @@ fun PageThumbCanvas(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
-    val bmp = rememberPageBitmap(notebookId, page)
+    val bmp = rememberPageBitmap(notebookId, page, sample = 4)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         androidx.compose.foundation.Canvas(
             Modifier

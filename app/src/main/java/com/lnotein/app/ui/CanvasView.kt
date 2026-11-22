@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke as DStrokeStyle
@@ -42,6 +43,7 @@ import com.lnotein.app.model.Page
 import com.lnotein.app.model.PaperType
 import com.lnotein.app.model.Stroke
 import com.lnotein.app.model.StrokePoint
+import com.lnotein.app.model.TextNote
 import com.lnotein.app.model.Tool
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -131,6 +133,18 @@ fun DrawScope.drawPaperPattern(page: Page, pw: Float, ph: Float) {
     }
 }
 
+fun DrawScope.drawTextNote(n: TextNote) {
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = n.color
+        textSize = n.fontSize
+    }
+    var y = n.y + n.fontSize
+    for (line in n.text.split("\n")) {
+        drawContext.canvas.nativeCanvas.drawText(line, n.x, y, paint)
+        y += n.fontSize * 1.4f
+    }
+}
+
 /** 页面有效尺寸（无限画布给一个固定的大画布底板） */
 fun pageSheetSize(page: Page): Pair<Float, Float> =
     if (page.paper == PaperType.INFINITE) 3000f to 4000f else page.width to page.height
@@ -149,17 +163,19 @@ fun DrawScope.drawPageContent(page: Page, bmp: ImageBitmap?) {
         }
         drawPaperPattern(page, pw, ph)
         page.strokes.forEach { drawStroke(it) }
+        page.texts.forEach { drawTextNote(it) }
     }
 }
 
 @Composable
-fun rememberPageBitmap(notebookId: String, page: Page): ImageBitmap? {
+fun rememberPageBitmap(notebookId: String, page: Page, sample: Int = 1): ImageBitmap? {
     val context = LocalContext.current
     val file = page.backgroundImage?.let { Store.bgFile(context, notebookId, it) }
     if (file == null || !file.exists()) return null
-    val state = produceState<ImageBitmap?>(initialValue = null, key1 = file) {
+    val state = produceState<ImageBitmap?>(initialValue = null, key1 = file, key2 = sample) {
         value = withContext(Dispatchers.IO) {
-            BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            BitmapFactory.decodeFile(file.absolutePath, opts)?.asImageBitmap()
         }
     }
     return state.value
@@ -174,6 +190,25 @@ private fun Modifier.canvasGestures(state: EditorState): Modifier = pointerInput
         val eraserStylus = down.type == PointerType.Eraser
         val touch = down.type == PointerType.Touch
         if (isStylus || eraserStylus) state.stylusSeen = true
+
+        // 文本工具：单击命中已有批注进入编辑，否则点击处新建
+        if (state.tool == Tool.TEXT) {
+            state.textTap(state.toCanvas(down.position))
+            down.consume()
+            while (true) {
+                val ev = awaitPointerEvent()
+                if (ev.changes.count { it.pressed } >= 2) {
+                    state.applyTransform(
+                        ev.calculateZoom(),
+                        ev.calculatePan(),
+                        ev.calculateCentroid(useCurrent = true)
+                    )
+                    ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                }
+                if (ev.changes.all { !it.pressed }) break
+            }
+            return@awaitEachGesture
+        }
 
         val t = if (eraserStylus) Tool.ERASER else state.tool
         var drawing = false

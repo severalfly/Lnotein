@@ -2,7 +2,7 @@ package com.lnotein.app.model
 
 import kotlinx.serialization.Serializable
 
-enum class Tool { PEN, MARKER, LASER, ERASER, PAN }
+enum class Tool { PEN, MARKER, LASER, ERASER, TEXT, PAN }
 
 enum class PaperType { INFINITE, A4_BLANK, A4_LINED, A4_GRID, A4_DOTS }
 
@@ -26,6 +26,17 @@ data class Stroke(
     val points: List<StrokePoint>
 )
 
+/** 文本批注：位置为页面坐标，fontSize 为页面单位（pt） */
+@Serializable
+data class TextNote(
+    val id: String,
+    var x: Float,
+    var y: Float,
+    var text: String,
+    var color: Int = 0xFF222222.toInt(),
+    var fontSize: Float = 16f
+)
+
 @Serializable
 data class Page(
     val id: String,
@@ -33,7 +44,8 @@ data class Page(
     val width: Float = 595f,
     val height: Float = 842f,
     var backgroundImage: String? = null,
-    val strokes: MutableList<Stroke> = mutableListOf()
+    val strokes: MutableList<Stroke> = mutableListOf(),
+    val texts: MutableList<TextNote> = mutableListOf()
 )
 
 @Serializable

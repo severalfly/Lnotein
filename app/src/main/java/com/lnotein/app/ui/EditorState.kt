@@ -13,6 +13,7 @@ import com.lnotein.app.data.Store
 import com.lnotein.app.model.Notebook
 import com.lnotein.app.model.Stroke
 import com.lnotein.app.model.StrokePoint
+import com.lnotein.app.model.TextNote
 import com.lnotein.app.model.Tool
 import com.lnotein.app.model.PaperType
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +45,11 @@ class EditorState(val context: Context, val notebook: Notebook) {
     var showPages by mutableStateOf(false)
     var showSettings by mutableStateOf(false)
 
+    // 文本批注编辑
+    var showTextDialog by mutableStateOf(false)
+    var pendingTextPos by mutableStateOf(Offset.Zero)
+    var editingText by mutableStateOf<TextNote?>(null)
+
     var liveStroke by mutableStateOf<Stroke?>(null)
         private set
     var laserPoints by mutableStateOf<List<StrokePoint>>(emptyList())
@@ -56,6 +62,8 @@ class EditorState(val context: Context, val notebook: Notebook) {
     private sealed interface Op {
         data class Add(val pageId: String, val stroke: Stroke) : Op
         data class Remove(val pageId: String, val strokes: List<Stroke>) : Op
+        data class AddText(val pageId: String, val note: TextNote) : Op
+        data class RemoveText(val pageId: String, val note: TextNote) : Op
     }
 
     private val undoStack = mutableListOf<Op>()
@@ -190,6 +198,78 @@ class EditorState(val context: Context, val notebook: Notebook) {
         }
     }
 
+    // ---------- 文本批注 ----------
+
+    private fun textNoteRect(n: TextNote): android.graphics.RectF {
+        val paint = android.graphics.Paint().apply { textSize = n.fontSize }
+        var maxW = 0f
+        for (line in n.text.split("\n")) {
+            val w = paint.measureText(line)
+            if (w > maxW) maxW = w
+        }
+        val lines = n.text.split("\n").size.coerceAtLeast(1)
+        return android.graphics.RectF(
+            n.x, n.y,
+            n.x + maxW.coerceAtLeast(n.fontSize),
+            n.y + lines * n.fontSize * 1.4f
+        )
+    }
+
+    /** 点击页面：命中已有文本批注则进入编辑，否则在点击处新建 */
+    fun textTap(p: Offset) {
+        val hit = page.texts.lastOrNull { n -> textNoteRect(n).contains(p.x, p.y) }
+        if (hit != null) {
+            editingText = hit
+        } else {
+            pendingTextPos = p
+            editingText = null
+        }
+        showTextDialog = true
+    }
+
+    fun saveText(text: String, color: Int) {
+        val t = text.trim('\n')
+        val existing = editingText
+        if (existing != null) {
+            if (t.isEmpty()) {
+                page.texts.remove(existing)
+                undoStack.add(Op.RemoveText(page.id, existing))
+                redoStack.clear()
+            } else {
+                existing.text = t
+                existing.color = color
+            }
+        } else if (t.isNotEmpty()) {
+            val note = TextNote(
+                id = UUID.randomUUID().toString(),
+                x = pendingTextPos.x,
+                y = pendingTextPos.y,
+                text = t,
+                color = color
+            )
+            page.texts.add(note)
+            undoStack.add(Op.AddText(page.id, note))
+            redoStack.clear()
+        }
+        showTextDialog = false
+        editingText = null
+        scheduleSave()
+    }
+
+    fun deleteText(note: TextNote) {
+        page.texts.remove(note)
+        undoStack.add(Op.RemoveText(page.id, note))
+        redoStack.clear()
+        showTextDialog = false
+        editingText = null
+        scheduleSave()
+    }
+
+    fun cancelTextDialog() {
+        showTextDialog = false
+        editingText = null
+    }
+
     fun tickLaser() {
         if (laserPoints.isNotEmpty() &&
             System.currentTimeMillis() - lastLaserTime > 900
@@ -225,6 +305,8 @@ class EditorState(val context: Context, val notebook: Notebook) {
         when (op) {
             is Op.Add -> pageById(op.pageId)?.strokes?.remove(op.stroke)
             is Op.Remove -> pageById(op.pageId)?.strokes?.addAll(op.strokes)
+            is Op.AddText -> pageById(op.pageId)?.texts?.remove(op.note)
+            is Op.RemoveText -> pageById(op.pageId)?.texts?.add(op.note)
         }
     }
 
@@ -232,6 +314,8 @@ class EditorState(val context: Context, val notebook: Notebook) {
         when (op) {
             is Op.Add -> pageById(op.pageId)?.strokes?.add(op.stroke)
             is Op.Remove -> pageById(op.pageId)?.strokes?.removeAll(op.strokes.toSet())
+            is Op.AddText -> pageById(op.pageId)?.texts?.add(op.note)
+            is Op.RemoveText -> pageById(op.pageId)?.texts?.remove(op.note)
         }
     }
 

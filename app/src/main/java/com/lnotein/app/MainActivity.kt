@@ -1,8 +1,11 @@
 package com.lnotein.app
 
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -35,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Alignment
@@ -47,6 +51,8 @@ import com.lnotein.app.model.PaperType
 import com.lnotein.app.model.Notebook
 import com.lnotein.app.ui.EditorScreen
 import com.lnotein.app.model.label
+import com.lnotein.app.pdf.PdfSupport
+import kotlinx.coroutines.launch
 
 sealed interface Screen {
     data object Library : Screen
@@ -87,13 +93,37 @@ private val coverColors = listOf(
 @Composable
 fun LibraryScreen(onOpen: (String) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var notebooks by remember { mutableStateOf(Store.listNotebooks(context)) }
     var showNew by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<Notebook?>(null) }
 
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val name = context.contentResolver
+                    .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                    ?.replace(Regex("\\.pdf$", RegexOption.IGNORE_CASE), "")
+                    ?: "导入的 PDF"
+                val nb = Store.newNotebook(name.ifBlank { "导入的 PDF" }, PaperType.A4_BLANK)
+                val added = PdfSupport.importPdf(context, uri, nb)
+                if (added > 0) {
+                    Store.saveNotebook(context, nb)
+                    notebooks = Store.listNotebooks(context)
+                    onOpen(nb.id)
+                }
+            }
+        }
+    }
+
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { showNew = true }) { Text("+") }
+            androidx.compose.material3.ExtendedFloatingActionButton(onClick = {
+                importLauncher.launch(arrayOf("application/pdf"))
+            }) { Text("导入 PDF") }
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
@@ -106,11 +136,7 @@ fun LibraryScreen(onOpen: (String) -> Unit) {
                     style = MaterialTheme.typography.headlineMedium,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    "v0.1",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                TextButton(onClick = { showNew = true }) { Text("新建笔记") }
             }
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 140.dp),
@@ -189,7 +215,8 @@ private fun NotebookCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        "${notebook.pages.size} 页",
+                        if (notebook.pages.any { it.backgroundImage != null }) "PDF · ${notebook.pages.size} 页"
+                        else "${notebook.pages.size} 页",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }

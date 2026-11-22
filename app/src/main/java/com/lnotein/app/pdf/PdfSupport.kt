@@ -15,6 +15,7 @@ import com.lnotein.app.model.Page
 import com.lnotein.app.model.PaperType
 import com.lnotein.app.model.Stroke
 import com.lnotein.app.model.StrokePoint
+import com.lnotein.app.model.TextNote
 import com.lnotein.app.model.Tool
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -120,6 +121,18 @@ object PdfSupport {
         c.drawPath(buildPath(s.points), paint)
     }
 
+    private fun drawTextAndroid(c: android.graphics.Canvas, n: TextNote) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = n.color
+            textSize = n.fontSize
+        }
+        var y = n.y + n.fontSize
+        for (line in n.text.split("\n")) {
+            c.drawText(line, n.x, y, paint)
+            y += n.fontSize * 1.4f
+        }
+    }
+
     /** 导入 PDF：每个 PDF 页生成一个笔记页，返回新增页数 */
     suspend fun importPdf(context: Context, uri: Uri, notebook: Notebook): Int =
         withContext(Dispatchers.IO) {
@@ -129,7 +142,7 @@ object PdfSupport {
                 val renderer = PdfRenderer(pfd)
                 for (i in 0 until renderer.pageCount) {
                     val pdfPage = renderer.openPage(i)
-                    val scale = 2f
+                    val scale = 3f
                     val bmp = Bitmap.createBitmap(
                         (pdfPage.width * scale).toInt().coerceAtLeast(1),
                         (pdfPage.height * scale).toInt().coerceAtLeast(1),
@@ -198,6 +211,7 @@ object PdfSupport {
                         drawPaperAndroid(c, page)
                     }
                     page.strokes.forEach { drawStrokeAndroid(c, it) }
+                    page.texts.forEach { drawTextAndroid(c, it) }
                     c.restore()
                     doc.finishPage(pdfPage)
                 }
